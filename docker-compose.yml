@@ -1,0 +1,28 @@
+version: "3"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+    volumes:
+      - .:/app
+    environment:
+      GIN_MODE: "debug"
+
+  postgres:
+    image: postgres:latest
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:
