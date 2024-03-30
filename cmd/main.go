@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 
@@ -21,7 +22,9 @@ func main() {
 	dbClient, _ := db.Initialize_postgres()
 	defer dbClient.Close()
 
-	// router.HandleFunc("/api/test", handlers.TestHandler)
+    router.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
+        fmt.Fprint(w, "pong")
+    })
 	router.HandleFunc("/api/v1/user/create", handlers.CreateUser(dbClient))
 
 	port := config.GOLANG_SERVER_PORT

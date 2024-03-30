@@ -39,7 +39,8 @@ func CreateUser(db *sql.DB) http.HandlerFunc {
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]string{
-			"token": token,
+			"userId": user.ID.String(),
+			"token":  token,
 		})
 	}
 }
