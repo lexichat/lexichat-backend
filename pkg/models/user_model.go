@@ -9,7 +9,7 @@ import (
 type User struct {
     ID            uuid.UUID `json:"id"`
     Username      string    `json:"username"`
-    PhoneNumber   int       `json:"phone_number"`
+    PhoneNumber   string    `json:"phone_number"`
     ProfilePicture []byte   `json:"profile_picture"`
     CreatedAt     string    `json:"created_at"`
 }
