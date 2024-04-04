@@ -14,8 +14,13 @@ import (
 )
 
 func main() {
+	config.LoadEnvVariables(".env.dev")
+
 	// setup logging
 	logging.Initialize_logging()
+
+    // setup FCM
+    // fcmClient, _ := fcm.SetupFCM()
 	
 	router := mux.NewRouter()
 
@@ -25,9 +30,40 @@ func main() {
     router.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
         fmt.Fprint(w, "pong")
     })
-	router.HandleFunc("/api/v1/user/create", handlers.CreateUser(dbClient))
 
-	port := config.GOLANG_SERVER_PORT
-	log.Printf("Server started on port: %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, router))
+	router.HandleFunc("/api/v1/users/create", handlers.CreateUser(dbClient))
+
+    router.HandleFunc("/channels/active-clients", handlers.GetActiveClientsHandler)
+
+    router.HandleFunc("/api/v1/users/discover", func(w http.ResponseWriter, r *http.Request) {
+        handlers.DiscoverUsersByUserIdHandler(w, r, dbClient)
+    }).Methods("GET")
+
+    router.HandleFunc("/api/v1/channels/init", func(w http.ResponseWriter, r *http.Request) {
+        handlers.CreateChannelHandler(w,r, dbClient)
+    })
+
+
+	log.Printf("App Server started on port: %s", config.APP_SERVER_PORT)
+    go func() {
+        log.Fatal(http.ListenAndServe(":"+config.APP_SERVER_PORT, router))
+    }()
+
+
+    ///// WS ROUTER ////
+	
+    log.Printf("WebSocket handler started on port: %s", config.WS_SERVER_PORT)
+    http.HandleFunc("/ws", handlers.HandleConnections)
+
+    go func() {
+        err := http.ListenAndServe(":"+ config.WS_SERVER_PORT, nil)
+        if err != nil {
+            log.Fatal("ListenAndServe: ", err)
+        }
+    }()
+
+
+
+    // Wait forever
+    select {}
 }
