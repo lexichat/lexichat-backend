@@ -17,7 +17,7 @@ services:
   postgres:
     image: postgres:latest
     env_file:
-      - .env
+      - .env.dev
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql
