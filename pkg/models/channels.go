@@ -7,7 +7,7 @@ import (
 
 type Channel struct {
     ID           int64     `json:"id"`
-    Name         string    `json:"name"`
+    Name         string    `json:"channel_name"`
     CreatedAt    time.Time `json:"created_at"`
     TonalityTag  string    `json:"tonality_tag"`
     Description  string    `json:"description"`

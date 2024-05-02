@@ -6,8 +6,8 @@ import (
 )
 
 type User struct {
-    UserID        string	`json:"userid"`
-    Username      string    `json:"username"`
+    UserID        string	`json:"user_id"`
+    Username      string    `json:"user_name"`
     PhoneNumber   string    `json:"phone_number"`
     ProfilePicture []byte   `json:"profile_picture"`
     CreatedAt     string    `json:"created_at"`

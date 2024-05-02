@@ -5,8 +5,7 @@ import (
 	"database/sql"
 	log "lexichat-backend/pkg/utils/logging"
 	"time"
-
-	"github.com/google/uuid"
+	// "github.com/google/uuid"
 )
 
 type MessageStatus string
@@ -19,10 +18,10 @@ const (
 )
 
 type Message struct {
-    ID           uuid.UUID `json:"id"`
+    ID           string `json:"id"`
     ChannelID    int64 	   `json:"channel_id"`
     CreatedAt    time.Time `json:"created_at"`
-    SenderUserID int64     `json:"sender_user_id"`
+    SenderUserID string     `json:"sender_user_id"`
     Content      string    `json:"content"`
     Status       MessageStatus    `json:"status"`
 }
@@ -36,7 +35,7 @@ func InsertMessage(message Message, db *sql.DB) error{
 		_, err := db.ExecContext(ctx, `
             INSERT INTO messages (sender_user_id, channel_id, content, id, status)
             VALUES ($1, $2, $3, $4)`,
-            message.SenderUserID, message.ChannelID, message.Content, uuid.New(), Sent)
+            message.SenderUserID, message.ChannelID, message.Content, message.ID, Sent)
         if err != nil {
             log.ErrorLogger.Printf("Error inserting message into the database: %v", err)
 			errs <- err
