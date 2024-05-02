@@ -2,26 +2,33 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"time"
+
+	"lexichat-backend/pkg/models"
 	auth "lexichat-backend/pkg/utils/auth"
+	chats "lexichat-backend/pkg/utils/chats"
 	"log"
 	"net/http"
 	"sync"
 
+	"firebase.google.com/go/messaging"
 	"github.com/gorilla/websocket"
 )
 
 type Client struct {
 	conn     *websocket.Conn
 	send     chan Message
-	ackChan  chan struct{}
+	ackChan  chan Acknowledgment
 	cancelFn context.CancelFunc
 	UserID	 string
 }
 
 type Channel struct {
-	ID      string
+	ID      int64
 	clients map[*Client]bool
 	broadcast chan Message
 	register  chan *Client
@@ -29,7 +36,7 @@ type Channel struct {
 	mu        sync.RWMutex
 }
 
-var channels = make(map[string]*Channel)
+var channels = make(map[int64]*Channel)
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -37,18 +44,27 @@ var upgrader = websocket.Upgrader{
 }
 
 type Acknowledgment struct {
-	IsSent  bool  `json:"isSent"` 
+	Status  	models.MessageStatus  `json:"status"` 
+	MessageID 	string 				  `json:"message_id"`
 }
 
 type Message struct {
-	Username string `json:"username"`
-	Message  string `json:"message"`
 	Sender   *Client 
+	Message  InBoundMessage
+}
+
+type InBoundMessage struct {
+	Content string `json:"message"`
+	MessageID string `json:"message_id"`
+}
+
+type OutBoundMessage struct {
+
 }
 
 
 
-func (c *Client) readPump(channel *Channel) {
+func (c *Client) readPump(channel *Channel, dbClient *sql.DB, fcmClient *messaging.Client) {
 	defer func() {
 		c.cancelFn()
 		channel.unregister <- c
@@ -56,15 +72,46 @@ func (c *Client) readPump(channel *Channel) {
 	}()
 
 	for {
+		var inBoundMsg InBoundMessage
 		var msg Message
-		err := c.conn.ReadJSON(&msg)
+		var ack Acknowledgment
+		err := c.conn.ReadJSON(&inBoundMsg)
 		if err != nil {
 			log.Printf("error in reading: %v", err)
 			return
 		}
+		
+		msg.Message = inBoundMsg
 		msg.Sender = c
 		channel.broadcast <- msg
-		c.ackChan <- struct{}{}
+
+		fmt.Println(msg.Message)
+
+    	// store msg in db
+		var dbMsg models.Message
+		dbMsg.ChannelID = channel.ID
+		dbMsg.ID = msg.Message.MessageID
+		dbMsg.Content = msg.Message.Content
+		dbMsg.SenderUserID = msg.Sender.UserID
+
+		var wg sync.WaitGroup
+
+		wg.Add(2)
+
+		go func ()  {
+			chats.StoreMessage(dbClient, dbMsg)
+			defer wg.Done()
+		}()		
+
+		ack.MessageID = dbMsg.ID
+        c.ackChan <- ack
+
+
+		go func ()  {
+			// OffLoadMessageToFCM(fcmClient, dbMsg, dbClient, channel)
+			defer wg.Done()
+		}()
+		wg.Wait()
 	}
 }
 
@@ -77,17 +124,30 @@ func (c *Client) writePump(channel *Channel) {
 			if !ok {
 				return
 			}
-			fmt.Println(channel.clients)
 
-			err := c.conn.WriteJSON(msg)
+			var outboundmsg models.Message
+			outboundmsg.ID = msg.Message.MessageID
+			outboundmsg.SenderUserID = msg.Sender.UserID
+			outboundmsg.CreatedAt = time.Now()
+			outboundmsg.Status = models.Sent
+			outboundmsg.ChannelID = channel.ID
+			outboundmsg.Content = msg.Message.Content
+
+			outboundData := map[string]interface{}{
+				"Message" : outboundmsg,
+			}
+
+			err := c.conn.WriteJSON(outboundData)
 			if err != nil {
 				log.Printf("error in writing: %v", err)
 				return
 			}
 
-		case <-c.ackChan:
-			// Send acknowledgment here
-			err := c.conn.WriteJSON(Acknowledgment{IsSent: true})
+		case ack := <-c.ackChan:
+			sentStatusUpdate := map[string]interface{} {
+				"Status" : Acknowledgment{Status: models.Sent, MessageID: ack.MessageID},
+			}
+			err := c.conn.WriteJSON(sentStatusUpdate)
 			if err != nil {
 				log.Printf("error: %v", err)
 				return
@@ -96,7 +156,7 @@ func (c *Client) writePump(channel *Channel) {
 	}
 }
 
-func (channel *Channel) runChannel() {
+func (channel *Channel) runChannel(dbClient *sql.DB, fcmClient *messaging.Client) {
 	for {
 		select {
 		case client := <-channel.register:
@@ -107,7 +167,7 @@ func (channel *Channel) runChannel() {
 			_, cancel := context.WithCancel(context.Background())
 			client.cancelFn = cancel
 			go client.writePump(channel)
-			go client.readPump(channel)
+			go client.readPump(channel, dbClient, fcmClient)
 
 		case client := <-channel.unregister:
 			channel.mu.Lock()
@@ -135,20 +195,21 @@ func (channel *Channel) runChannel() {
 	}
 }
 
-func HandleConnections(w http.ResponseWriter, r *http.Request) {
+func HandleConnections(w http.ResponseWriter, r *http.Request, dbClient *sql.DB, fcmClient *messaging.Client) {
 	channelID := r.URL.Query().Get("channel")
+	channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
 
-	channel, ok := channels[channelID]
+	channel, ok := channels[channelIDInt]
 	if !ok {
 		channel = &Channel{
-			ID:        channelID,
+			ID:        channelIDInt,
 			clients:   make(map[*Client]bool),
 			broadcast: make(chan Message),
 			register:  make(chan *Client),
 			unregister: make(chan *Client),
 		}
-		channels[channelID] = channel
-		go channel.runChannel()
+		channels[channelIDInt] = channel
+		go channel.runChannel(dbClient, fcmClient)
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -168,7 +229,7 @@ func HandleConnections(w http.ResponseWriter, r *http.Request) {
 	client := &Client{
 		conn:    conn,
 		send:    make(chan Message, 256),
-		ackChan: make(chan struct{}, 1),
+		ackChan: make(chan Acknowledgment, 8),
 		UserID: userId,
 	}
 
@@ -188,7 +249,8 @@ func (channel *Channel) GetActiveClients() []*Client {
 
 func GetActiveClientsHandler(w http.ResponseWriter, r *http.Request) {
 	channelID := r.URL.Query().Get("channel")
-	channel, ok := channels[channelID]
+	channelIDInt, _ := strconv.ParseInt(channelID, 10, 64)
+	channel, ok := channels[channelIDInt]
 	if !ok {
 		http.Error(w, "Channel not found", http.StatusNotFound)
 		return
@@ -204,4 +266,47 @@ func GetActiveClientsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
+}
+
+
+func (channel *Channel) FetchUnConnectedClientsIds(dbClient *sql.DB) ([]string, error) {
+    ctx := context.Background()
+
+    rows, err := dbClient.QueryContext(ctx, `
+        SELECT user_id
+        FROM channel_users
+        WHERE channel_id = $1
+    `, channel.ID)
+    if err != nil {
+        return nil, fmt.Errorf("failed to fetch unconnected clients: %w", err)
+    }
+    defer rows.Close()
+
+    var dbClients []string
+    for rows.Next() {
+        var userID string
+        err = rows.Scan(&userID)
+        if err != nil {
+            return nil, fmt.Errorf("failed to scan user ID: %w", err)
+        }
+        dbClients = append(dbClients, userID)
+    }
+
+    activeClients := channel.GetActiveClients()
+
+    var unconnectedUserIds []string
+    for _, dbclient := range dbClients {
+        found := false
+        for _, activeClient := range activeClients {
+            if activeClient.UserID == dbclient {
+                found = true
+                break
+            }
+        }
+        if !found {
+            unconnectedUserIds = append(unconnectedUserIds, dbclient)
+        }
+    }
+
+    return unconnectedUserIds, nil
 }
