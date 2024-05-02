@@ -26,11 +26,11 @@ CREATE TABLE IF NOT EXISTS messages (
     id UUID PRIMARY KEY,
     channel_id BIGSERIAL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    sender_user_id BIGINT,
+    sender_user_id VARCHAR,
     message TEXT,
     status VARCHAR,
     FOREIGN KEY (channel_id) REFERENCES channels(id),
-    FOREIGN KEY (sender_user_id) REFERENCES users(id)
+    FOREIGN KEY (sender_user_id) REFERENCES users(user_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_channel_id_created_at ON messages (channel_id, created_at DESC);
