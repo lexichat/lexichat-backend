@@ -80,3 +80,30 @@ func DiscoverUsersByUserIdHandler(w http.ResponseWriter, r *http.Request, db *sq
     w.Header().Set("Content-Type", "application/json")
     w.Write(usersJSON)
 }
+
+func FetchUserDetailsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB, userID string) {
+	var user models.User
+	user, err := FetchUserDetails(userID, db)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Problem fetching user details: %s", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+func FetchUserDetails(userID string, db *sql.DB) (models.User, error){
+	query := `SELECT user_id, user_name, phone_number, profile_picture, created_at, fcm_token FROM users WHERE user_id = $1`
+
+	var user models.User
+	err := db.QueryRow(query, userID).Scan(&user.UserID, &user.Username, &user.PhoneNumber, &user.ProfilePicture, &user.CreatedAt, &user.FCMToken)
+
+	print(fmt.Printf("%#v", user))
+
+	if err != nil {
+		logging.ErrorLogger.Printf( fmt.Sprintf("Error in fetching user details. %s", err.Error()))
+		return models.User{}, err
+	}
+	return user, nil
+}
